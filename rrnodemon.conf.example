@@ -1,0 +1,31 @@
+# Rrnodemon configuration. Copy to /etc/rrnodemon/rrnodemon.conf and edit.
+
+[rnode]
+# The RNode's serial port. rnsd no longer opens it; Rrnodemon does.
+port = /dev/ttyACM0
+# speed = 115200
+
+[rnsd]
+# Where rnsd connects. In rnsd's config, the RNode interface's port becomes
+#   port = tcp://127.0.0.1
+# (RNS uses TCP port 7633 for RNodes; it cannot be changed.)
+listen = 127.0.0.1
+
+[mqtt]
+# The broker Rradmon reads: mqtt://, mqtts:// (TLS), ws:// or wss://
+uri = mqtt://192.168.1.10:1883
+user =
+# The password goes in a file of its own (chmod 600), or in the
+# RRNODEMON_MQTT_PASSWORD environment variable; never in this file.
+password_file =
+# prefix = rradmon/v1
+
+[observer]
+# How Rradmon names this observer: letters, digits, . _ - (up to 64).
+# Default: rrnodemon-<host name>
+# id = rnsd-garage
+# Position, shown on Rradmon's map
+# lat = -33.86
+# lon = 151.21
+# Channel report interval in seconds, 60 to 600
+# chan_interval = 60

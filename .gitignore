@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+# local configs and broker credentials
+*.conf
+!rrnodemon.conf.example
+mqtt_password
+secret/

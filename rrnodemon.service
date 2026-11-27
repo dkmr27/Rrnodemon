@@ -1,0 +1,15 @@
+[Unit]
+Description=Rrnodemon: RNode pass-through observer for Rradmon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# The user needs the serial port: on Debian and Raspberry Pi OS, the dialout group
+User=rrnodemon
+SupplementaryGroups=dialout
+ExecStart=/usr/bin/python3 /opt/rrnodemon/rrnodemon.py -c /etc/rrnodemon/rrnodemon.conf
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
