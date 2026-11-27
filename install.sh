@@ -17,6 +17,11 @@
 
 set -e
 
+# sudo on some systems (Slackware) keeps the caller's PATH, without the
+# sbin folders that useradd and usermod live in
+PATH=/usr/local/sbin:/usr/sbin:/sbin:$PATH
+export PATH
+
 DESTDIR=${DESTDIR:-}
 DRY_RUN=${DRY_RUN:-}
 OPT=$DESTDIR/opt/rrnodemon
@@ -158,11 +163,28 @@ if [ -n "$missing" ]; then
   fi
 fi
 
-# ---- The user, in the group that owns the serial ports
+# ---- The user, in the group that owns the serial port: the configured
+# port if there is a config, else the first RNode-like port, else the usual
+# serial group. Never root: a port only root may use needs fixing by hand.
+port_dev=""
+if [ -f "$ETC/rrnodemon.conf" ]; then
+  port_dev=$(sed -n 's/^port *= *//p' "$ETC/rrnodemon.conf" | head -n 1)
+fi
+if [ -z "$port_dev" ] || [ ! -e "$port_dev" ]; then
+  port_dev=""
+  for dev in /dev/ttyACM* /dev/ttyUSB*; do
+    if [ -e "$dev" ]; then port_dev=$dev; break; fi
+  done
+fi
 port_group=""
-for dev in /dev/ttyACM* /dev/ttyUSB*; do
-  if [ -e "$dev" ]; then port_group=$(stat -c %G "$dev"); break; fi
-done
+if [ -n "$port_dev" ]; then
+  port_group=$(stat -L -c %G "$port_dev" 2>/dev/null || true)
+  if [ "$port_group" = root ]; then
+    warn "$port_dev belongs to group root, so $USER_NAME cannot use it; $USER_NAME is not added to root."
+    warn "Give the port a serial group (e.g. dialout or uucp) and run this again: ls -l $port_dev"
+    port_group=""
+  fi
+fi
 if [ -z "$port_group" ]; then
   for g in dialout uucp; do
     if getent group "$g" >/dev/null 2>&1; then port_group=$g; break; fi
@@ -170,6 +192,11 @@ if [ -z "$port_group" ]; then
 fi
 if id "$USER_NAME" >/dev/null 2>&1; then
   say "User $USER_NAME exists"
+  # Undo an earlier version of this script, which could add it to root
+  if id -nG "$USER_NAME" | tr ' ' '\n' | grep -qx root; then
+    say "Removing $USER_NAME from group root"
+    run gpasswd -d "$USER_NAME" root
+  fi
   if [ -n "$port_group" ] && ! id -nG "$USER_NAME" | tr ' ' '\n' | grep -qx "$port_group"; then
     say "Adding $USER_NAME to group $port_group (serial ports)"
     run usermod -a -G "$port_group" "$USER_NAME"
