@@ -55,70 +55,88 @@ the same in `user` and `password_file`.
 Needs Python 3.7 or later with pyserial and paho-mqtt (1.x or 2.x). A
 machine running rnsd has pyserial already.
 
+From a copy of this repository, as root:
+
 ```
-sudo apt install python3-serial python3-paho-mqtt      # Debian, Raspberry Pi OS
+sudo ./install.sh
+```
+
+It installs:
+
+- `rrnodemon.py` in `/opt/rrnodemon`;
+- a config in `/etc/rrnodemon/rrnodemon.conf`, from the example (an existing
+  one is kept);
+- a user `rrnodemon`, in the group that owns the serial ports;
+- a service that starts at boot: systemd where there is one, else the
+  Slackware rc script (`/etc/rc.d/rc.rrnodemon`, started from `rc.local`,
+  with a logrotate entry).
+
+On Debian and Raspberry Pi OS it installs pyserial and paho-mqtt with apt if
+they are missing; elsewhere it says which are missing (`pip3 install
+paho-mqtt`, or your distribution's package).
+
+Then:
+
+1. Edit `/etc/rrnodemon/rrnodemon.conf`: the RNode's port, the MQTT broker
+   and the observer id.
+2. If the broker needs a password, put it in a file of its own and name it
+   in `password_file`:
+
+   ```
+   sudo sh -c 'umask 077; cat > /etc/rrnodemon/mqtt_password'
+   sudo chown rrnodemon /etc/rrnodemon/mqtt_password
+   ```
+
+3. Start it: `sudo systemctl start rrnodemon`, or on Slackware
+   `sudo /etc/rc.d/rc.rrnodemon start`. Its log: `journalctl -u rrnodemon -f`,
+   or `/var/log/rrnodemon.log`.
+4. In rnsd's config (`~/.reticulum/config`), point the RNode interface at
+   Rrnodemon instead of the serial port, keep its radio settings, and
+   restart rnsd:
+
+   ```ini
+     [[RNode]]
+       type = RNodeInterface
+       interface_enabled = true
+       port = tcp://127.0.0.1
+       frequency = 925875000
+       bandwidth = 250000
+       txpower = 10
+       spreadingfactor = 9
+       codingrate = 5
+   ```
+
+To update, get the new version and run `sudo ./install.sh` again: it keeps
+the config and restarts Rrnodemon. `sudo ./install.sh --uninstall` removes
+the program and the service, and leaves `/etc/rrnodemon` and the user.
+
+The Slackware rc script also takes `restart` and `status`, and `chmod 644
+/etc/rc.d/rc.rrnodemon` disables it. Like the systemd service, it starts
+Rrnodemon again 5 s after it exits.
+
+### Without the installer
+
+The installer does no more than this; with systemd:
+
+```
+sudo useradd --system --no-create-home -G dialout rrnodemon
 sudo mkdir -p /opt/rrnodemon /etc/rrnodemon
 sudo cp rrnodemon.py /opt/rrnodemon/
 sudo cp rrnodemon.conf.example /etc/rrnodemon/rrnodemon.conf
-sudo nano /etc/rrnodemon/rrnodemon.conf                 # port, broker, observer id
-```
-
-Put the broker password in a file of its own and name it in `password_file`:
-
-```
-sudo sh -c 'umask 077; cat > /etc/rrnodemon/mqtt_password'
-```
-
-Then, in rnsd's config (`~/.reticulum/config`), point the RNode interface at
-Rrnodemon instead of the serial port. Keep its radio settings:
-
-```ini
-  [[RNode]]
-    type = RNodeInterface
-    interface_enabled = true
-    port = tcp://127.0.0.1
-    frequency = 925875000
-    bandwidth = 250000
-    txpower = 10
-    spreadingfactor = 9
-    codingrate = 5
-```
-
-Run it as a service:
-
-```
-sudo useradd --system --no-create-home rrnodemon
-sudo chown rrnodemon /etc/rrnodemon/mqtt_password
 sudo cp rrnodemon.service /etc/systemd/system/
 sudo systemctl enable --now rrnodemon
-sudo systemctl restart rnsd        # or however rnsd runs here
-journalctl -u rrnodemon -f
 ```
 
-On Slackware, which has no systemd, use the rc script instead. Find the
-group that owns the RNode's port with `ls -l /dev/ttyACM0` (or
-`/dev/ttyUSB0`) and put that group in place of `uucp` below:
-
-```
-sudo useradd -r -s /bin/false -G uucp rrnodemon
-sudo chown rrnodemon /etc/rrnodemon/mqtt_password
-sudo cp rc.rrnodemon /etc/rc.d/ && sudo chmod 755 /etc/rc.d/rc.rrnodemon
-sudo /etc/rc.d/rc.rrnodemon start
-tail -f /var/log/rrnodemon.log
-```
-
-To start it at boot, add to `/etc/rc.d/rc.local`:
+On Slackware, copy `rc.rrnodemon` to `/etc/rc.d/` (mode 755) instead of the
+unit, and add to `/etc/rc.d/rc.local`:
 
 ```
 if [ -x /etc/rc.d/rc.rrnodemon ]; then /etc/rc.d/rc.rrnodemon start; fi
 ```
 
-and the same with `stop` to `/etc/rc.d/rc.local_shutdown`. The script also
-takes `restart` and `status`; `chmod 644` disables it. If Rrnodemon exits,
-the script starts it again after 5 s. The paths and options are at the top
-of the script. The log grows without limit unless logrotate handles it, for
-example with `/etc/logrotate.d/rrnodemon` containing
-`/var/log/rrnodemon.log { weekly rotate 4 compress missingok copytruncate }`.
+and the same with `stop` to `/etc/rc.d/rc.local_shutdown`. The group that
+owns the serial ports there may be `uucp` rather than `dialout`: check with
+`ls -l /dev/ttyACM0`.
 
 Start order does not matter. rnsd retries a TCP RNode every few seconds until
 Rrnodemon answers, and reconnects by itself if Rrnodemon restarts. If the
