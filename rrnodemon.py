@@ -37,6 +37,7 @@ import time
 from urllib.parse import urlparse
 
 VERSION = "0.1.0"
+STATUS_LOG_INTERVAL = 15 * 60  # s between status lines in the log
 
 log = logging.getLogger("rrnodemon")
 
@@ -559,13 +560,18 @@ def main(argv=None):
 
     bridge = Bridge(cfg["port"], cfg["speed"], cfg["listen"], monitor, on_events)
     bridge.start()
+    # Status to Rradmon every minute; to the log after the first minute, then
+    # every STATUS_LOG_INTERVAL
+    next_log = time.monotonic() + 60
     try:
         while True:
             time.sleep(60)
             pub.status()
-            log.info("status: rnsd %s, %d packets, %d published, %d dropped",
-                     "connected" if bridge.host_connected() else "not connected",
-                     counts["rx"], pub.published, pub.dropped)
+            if time.monotonic() >= next_log - 1:
+                next_log = time.monotonic() + STATUS_LOG_INTERVAL
+                log.info("status: rnsd %s, %d packets, %d published, %d dropped",
+                         "connected" if bridge.host_connected() else "not connected",
+                         counts["rx"], pub.published, pub.dropped)
     except KeyboardInterrupt:
         pass
     finally:

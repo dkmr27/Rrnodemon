@@ -2,6 +2,7 @@
 #
 # Install or update Rrnodemon. Run as root from this folder:
 #   sudo ./install.sh              install, or update an existing install
+#   sudo ./install.sh --login      set or change the MQTT user and password
 #   sudo ./install.sh --uninstall  remove it (keeps /etc/rrnodemon and the user)
 #
 # It installs rrnodemon.py in /opt/rrnodemon, a config in /etc/rrnodemon
@@ -69,13 +70,72 @@ uninstall() {
   say "Point rnsd's RNode interface back at the serial port and restart rnsd."
 }
 
-if [ "$1" = "--uninstall" ]; then
-  uninstall
-  exit 0
-elif [ -n "$1" ]; then
-  echo "usage: $0 [--uninstall]"
-  exit 1
-fi
+# Ask for the broker's user and password. The password goes in a file only
+# rrnodemon can read, and the config names the user and that file.
+ask_login() {
+  conf=$ETC/rrnodemon.conf
+  [ -f "$conf" ] || die "no $conf: install first"
+  printf "MQTT broker user (Enter if it needs no login): "
+  read -r mq_user || mq_user=""
+  if [ -z "$mq_user" ]; then
+    say "No MQTT login set"
+    return 1
+  fi
+  printf "Password for %s (not shown): " "$mq_user"
+  trap 'stty echo 2>/dev/null' EXIT INT TERM
+  stty -echo 2>/dev/null || true
+  read -r mq_pass || mq_pass=""
+  stty echo 2>/dev/null || true
+  trap - EXIT INT TERM
+  echo
+  if [ -z "$mq_pass" ]; then
+    warn "no password given: the login was not changed"
+    return 1
+  fi
+  (umask 077; printf '%s\n' "$mq_pass" > "$ETC/mqtt_password")
+  chmod 600 "$ETC/mqtt_password"
+  run chown "$USER_NAME" "$ETC/mqtt_password"
+  if grep -q '^user *=' "$conf" && grep -q '^password_file *=' "$conf"; then
+    # The user name goes into a sed replacement: escape \ | &
+    u=$(printf '%s' "$mq_user" | sed 's/[\\|&]/\\&/g')
+    sed -i -e "s|^user *=.*|user = $u|" \
+      -e "s|^password_file *=.*|password_file = /etc/rrnodemon/mqtt_password|" "$conf"
+    say "MQTT login saved: user $mq_user in the config, the password in /etc/rrnodemon/mqtt_password"
+  else
+    say "Password saved in /etc/rrnodemon/mqtt_password. Set these in the [mqtt] section of $conf:"
+    echo "    user = $mq_user"
+    echo "    password_file = /etc/rrnodemon/mqtt_password"
+  fi
+  return 0
+}
+
+# Restart Rrnodemon if it is running, for a changed login
+restart_if_running() {
+  case $INIT in
+    systemd) run systemctl try-restart rrnodemon ;;
+    slackware)
+      if [ -x /etc/rc.d/rc.rrnodemon ] && /etc/rc.d/rc.rrnodemon status >/dev/null 2>&1; then
+        run /etc/rc.d/rc.rrnodemon restart
+      fi
+      ;;
+  esac
+}
+
+case $1 in
+  --uninstall)
+    uninstall
+    exit 0
+    ;;
+  --login)
+    if ask_login; then restart_if_running; fi
+    exit 0
+    ;;
+  "") ;;
+  *)
+    echo "usage: $0 [--login | --uninstall]"
+    exit 1
+    ;;
+esac
 
 # ---- Python and its modules
 command -v python3 >/dev/null 2>&1 || die "python3 not found"
@@ -137,6 +197,12 @@ else
 fi
 chmod 640 "$ETC/rrnodemon.conf"
 run chgrp "$USER_NAME" "$ETC/rrnodemon.conf"
+# A new config: ask for the broker login now, when someone is there to answer
+login_set=""
+if [ -n "$new_config" ] && [ -t 0 ]; then
+  echo
+  if ask_login; then login_set=1; fi
+fi
 if [ -f "$ETC/mqtt_password" ]; then
   chmod 600 "$ETC/mqtt_password"
   run chown "$USER_NAME" "$ETC/mqtt_password"
@@ -199,12 +265,9 @@ fi
 cat <<EOF
 Rrnodemon is installed. To finish:
 
-1. Edit /etc/rrnodemon/rrnodemon.conf: the RNode's port, the MQTT broker,
-   and the observer id.
-2. If the broker needs a password, put it in a file of its own:
-     sh -c 'umask 077; cat > /etc/rrnodemon/mqtt_password'
-     chown $USER_NAME /etc/rrnodemon/mqtt_password
-   and set password_file = /etc/rrnodemon/mqtt_password in the config.
+1. Edit /etc/rrnodemon/rrnodemon.conf: the RNode's port, the MQTT broker's
+   address (uri), and the observer id.${login_set:+ The MQTT login is already set.}
+2. ${login_set:+To change the MQTT login later}${login_set:-If the broker needs a user and password, set them}:  sudo ./install.sh --login
 3. Start it:  $start_cmd
 4. In rnsd's config, change the RNode interface's port to
      port = tcp://127.0.0.1

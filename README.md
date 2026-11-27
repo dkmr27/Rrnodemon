@@ -75,22 +75,24 @@ On Debian and Raspberry Pi OS it installs pyserial and paho-mqtt with apt if
 they are missing; elsewhere it says which are missing (`pip3 install
 paho-mqtt`, or your distribution's package).
 
+On a new install it asks for the MQTT broker's user and password; press
+Enter at the user prompt if the broker needs no login. The password is not
+shown as you type it. It is kept in `/etc/rrnodemon/mqtt_password`, which
+only the `rrnodemon` user can read, never in the config itself. To set or
+change the login later (this restarts Rrnodemon if it is running):
+
+```
+sudo ./install.sh --login
+```
+
 Then:
 
-1. Edit `/etc/rrnodemon/rrnodemon.conf`: the RNode's port, the MQTT broker
-   and the observer id.
-2. If the broker needs a password, put it in a file of its own and name it
-   in `password_file`:
-
-   ```
-   sudo sh -c 'umask 077; cat > /etc/rrnodemon/mqtt_password'
-   sudo chown rrnodemon /etc/rrnodemon/mqtt_password
-   ```
-
-3. Start it: `sudo systemctl start rrnodemon`, or on Slackware
+1. Edit `/etc/rrnodemon/rrnodemon.conf`: the RNode's port, the MQTT broker's
+   address (`uri`) and the observer id.
+2. Start it: `sudo systemctl start rrnodemon`, or on Slackware
    `sudo /etc/rc.d/rc.rrnodemon start`. Its log: `journalctl -u rrnodemon -f`,
    or `/var/log/rrnodemon.log`.
-4. In rnsd's config (`~/.reticulum/config`), point the RNode interface at
+3. In rnsd's config (`~/.reticulum/config`), point the RNode interface at
    Rrnodemon instead of the serial port, keep its radio settings, and
    restart rnsd:
 
@@ -138,6 +140,15 @@ and the same with `stop` to `/etc/rc.d/rc.local_shutdown`. The group that
 owns the serial ports there may be `uucp` rather than `dialout`: check with
 `ls -l /dev/ttyACM0`.
 
+For a broker login, set `user` in the config, write the password on a line
+of its own in `/etc/rrnodemon/mqtt_password` (with any editor), and set
+`password_file = /etc/rrnodemon/mqtt_password`. Then make the file private:
+
+```
+sudo chown rrnodemon /etc/rrnodemon/mqtt_password
+sudo chmod 600 /etc/rrnodemon/mqtt_password
+```
+
 Start order does not matter. rnsd retries a TCP RNode every few seconds until
 Rrnodemon answers, and reconnects by itself if Rrnodemon restarts. If the
 RNode is unplugged, Rrnodemon reopens it when it is back and makes rnsd
@@ -153,7 +164,9 @@ python3 rrnodemon.py -c rrnodemon.conf -v
 ```
 
 `-v` logs each packet received (`rx`) and each packet rnsd sends (`tx`),
-which also helps to see what an RNode is doing on air.
+which also helps to see what an RNode is doing on air. Without it the log
+has connections, problems, and a status line (rnsd connected, packets heard
+and published) a minute after starting and then every 15 minutes.
 
 ## Security
 
