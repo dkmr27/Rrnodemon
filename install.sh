@@ -177,15 +177,23 @@ if [ -z "$port_dev" ] || [ ! -e "$port_dev" ]; then
   done
 fi
 port_group=""
+port_open=""
 if [ -n "$port_dev" ]; then
   port_group=$(stat -L -c %G "$port_dev" 2>/dev/null || true)
-  if [ "$port_group" = root ]; then
-    warn "$port_dev belongs to group root, so $USER_NAME cannot use it; $USER_NAME is not added to root."
-    warn "Give the port a serial group (e.g. dialout or uucp) and run this again: ls -l $port_dev"
+  port_mode=$(stat -L -c %a "$port_dev" 2>/dev/null || echo 0)
+  case $port_mode in
+    *[67]) port_open=1 ;; # read and write for everyone (e.g. a udev MODE="0666")
+  esac
+  if [ -n "$port_open" ]; then
+    say "$port_dev can be used by every user (mode $port_mode): no group needed"
+    port_group=""
+  elif [ "$port_group" = root ]; then
+    warn "only root can use $port_dev (group root, mode $port_mode); $USER_NAME is not added to root."
+    warn "Give the port a serial group (e.g. dialout or uucp) and run this again: ls -lL $port_dev"
     port_group=""
   fi
 fi
-if [ -z "$port_group" ]; then
+if [ -z "$port_group" ] && [ -z "$port_open" ]; then
   for g in dialout uucp; do
     if getent group "$g" >/dev/null 2>&1; then port_group=$g; break; fi
   done
@@ -205,7 +213,9 @@ else
   say "Adding user $USER_NAME${port_group:+, in group $port_group (serial ports)}"
   run useradd -r -M -d /nonexistent -s /bin/false ${port_group:+-G "$port_group"} "$USER_NAME"
 fi
-[ -n "$port_group" ] || warn "could not tell which group owns the serial ports; add $USER_NAME to it by hand"
+if [ -z "$port_group" ] && [ -z "$port_open" ]; then
+  warn "could not tell which group owns the serial ports; add $USER_NAME to it by hand"
+fi
 
 # ---- Files
 updating=""
