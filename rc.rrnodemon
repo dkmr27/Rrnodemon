@@ -1,0 +1,118 @@
+#!/bin/sh
+#
+# /etc/rc.d/rc.rrnodemon: start, stop or restart Rrnodemon on Slackware.
+#
+# Install:
+#   cp rc.rrnodemon /etc/rc.d/ && chmod 755 /etc/rc.d/rc.rrnodemon
+# (chmod 644 disables it), and add to /etc/rc.d/rc.local:
+#   if [ -x /etc/rc.d/rc.rrnodemon ]; then /etc/rc.d/rc.rrnodemon start; fi
+# and to /etc/rc.d/rc.local_shutdown:
+#   if [ -x /etc/rc.d/rc.rrnodemon ]; then /etc/rc.d/rc.rrnodemon stop; fi
+#
+# Rrnodemon runs as RRNODEMON_USER, which needs the RNode's serial port: add
+# it to the group that owns the port (ls -l /dev/ttyACM0 or /dev/ttyUSB0).
+# If it exits, it is started again after 5 s, as systemd's Restart=always
+# does. Its log goes to LOGFILE.
+
+PYTHON=/usr/bin/python3
+RRNODEMON=/opt/rrnodemon/rrnodemon.py
+CONFIG=/etc/rrnodemon/rrnodemon.conf
+RRNODEMON_USER=rrnodemon
+OPTIONS=""                 # -v to log every packet
+LOGFILE=/var/log/rrnodemon.log
+PIDDIR=/var/run/rrnodemon
+PIDFILE=$PIDDIR/rrnodemon.pid
+
+# The process group leader: the restart loop, Rrnodemon is its child
+running_pid() {
+  [ -r "$PIDFILE" ] || return 1
+  pid=$(cat "$PIDFILE" 2>/dev/null)
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
+
+# Runs as RRNODEMON_USER, in a session of its own (see start)
+run_loop() {
+  echo $$ > "$PIDFILE"
+  while :; do
+    $PYTHON "$RRNODEMON" -c "$CONFIG" $OPTIONS
+    echo "$(date '+%Y-%m-%d %H:%M:%S') rc.rrnodemon: rrnodemon exited ($?), starting it again in 5 s"
+    sleep 5
+  done
+}
+
+rrnodemon_start() {
+  if pid=$(running_pid); then
+    echo "Rrnodemon is already running (pid $pid)."
+    return 0
+  fi
+  for f in "$PYTHON" "$RRNODEMON" "$CONFIG"; do
+    if [ ! -r "$f" ]; then
+      echo "rc.rrnodemon: $f not found." >&2
+      return 1
+    fi
+  done
+  if ! id "$RRNODEMON_USER" >/dev/null 2>&1; then
+    echo "rc.rrnodemon: no user $RRNODEMON_USER (useradd -r -s /bin/false $RRNODEMON_USER)." >&2
+    return 1
+  fi
+  mkdir -p "$PIDDIR"
+  chown "$RRNODEMON_USER" "$PIDDIR"
+  touch "$LOGFILE"
+  chown "$RRNODEMON_USER" "$LOGFILE"
+  chmod 640 "$LOGFILE"
+  echo "Starting Rrnodemon:  $RRNODEMON -c $CONFIG $OPTIONS"
+  # setsid makes the loop a process group of its own, so stop ends the loop
+  # and Rrnodemon together
+  su -s /bin/sh "$RRNODEMON_USER" -c \
+    "setsid /bin/sh '$SELF' run-loop >> '$LOGFILE' 2>&1 < /dev/null &"
+  # Wait for the pid file, and check it is still running a moment later
+  i=0
+  while [ $i -lt 20 ] && ! running_pid >/dev/null; do
+    sleep 0.1 2>/dev/null || sleep 1
+    i=$((i + 1))
+  done
+  sleep 1
+  if ! pid=$(running_pid); then
+    echo "rc.rrnodemon: Rrnodemon did not start; see $LOGFILE." >&2
+    return 1
+  fi
+}
+
+rrnodemon_stop() {
+  if ! pid=$(running_pid); then
+    echo "Rrnodemon is not running."
+    rm -f "$PIDFILE"
+    return 0
+  fi
+  echo "Stopping Rrnodemon (pid $pid)."
+  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid"
+  i=0
+  while [ $i -lt 10 ] && kill -0 "$pid" 2>/dev/null; do
+    sleep 1
+    i=$((i + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid"
+  fi
+  rm -f "$PIDFILE"
+}
+
+rrnodemon_status() {
+  if pid=$(running_pid); then
+    echo "Rrnodemon is running (pid $pid); log: $LOGFILE"
+  else
+    echo "Rrnodemon is not running."
+    return 3
+  fi
+}
+
+SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+
+case "$1" in
+  start) rrnodemon_start ;;
+  stop) rrnodemon_stop ;;
+  restart) rrnodemon_stop; sleep 1; rrnodemon_start ;;
+  status) rrnodemon_status ;;
+  run-loop) run_loop ;;
+  *) echo "usage: $0 start|stop|restart|status"; exit 1 ;;
+esac

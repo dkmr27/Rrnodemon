@@ -95,6 +95,31 @@ sudo systemctl restart rnsd        # or however rnsd runs here
 journalctl -u rrnodemon -f
 ```
 
+On Slackware, which has no systemd, use the rc script instead. Find the
+group that owns the RNode's port with `ls -l /dev/ttyACM0` (or
+`/dev/ttyUSB0`) and put that group in place of `uucp` below:
+
+```
+sudo useradd -r -s /bin/false -G uucp rrnodemon
+sudo chown rrnodemon /etc/rrnodemon/mqtt_password
+sudo cp rc.rrnodemon /etc/rc.d/ && sudo chmod 755 /etc/rc.d/rc.rrnodemon
+sudo /etc/rc.d/rc.rrnodemon start
+tail -f /var/log/rrnodemon.log
+```
+
+To start it at boot, add to `/etc/rc.d/rc.local`:
+
+```
+if [ -x /etc/rc.d/rc.rrnodemon ]; then /etc/rc.d/rc.rrnodemon start; fi
+```
+
+and the same with `stop` to `/etc/rc.d/rc.local_shutdown`. The script also
+takes `restart` and `status`; `chmod 644` disables it. If Rrnodemon exits,
+the script starts it again after 5 s. The paths and options are at the top
+of the script. The log grows without limit unless logrotate handles it, for
+example with `/etc/logrotate.d/rrnodemon` containing
+`/var/log/rrnodemon.log { weekly rotate 4 compress missingok copytruncate }`.
+
 Start order does not matter. rnsd retries a TCP RNode every few seconds until
 Rrnodemon answers, and reconnects by itself if Rrnodemon restarts. If the
 RNode is unplugged, Rrnodemon reopens it when it is back and makes rnsd
