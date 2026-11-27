@@ -35,6 +35,21 @@ Messages are Rradmon observer messages v1 (Rradmon `docs/spec-v0.md`,
 section 5), under `rradmon/v1/<freq>-<bw>-<sf>-<cr>/<observer id>/`. A
 Rradmon server 0.3.0 or later is needed.
 
+## No MQTT broker?
+
+If Rradmon runs on the same machine as rnsd, it can be the broker itself
+(Rradmon 0.4.0 and later): start it with `rradmon run -mqtt-listen
+127.0.0.1:1883 …` and set Rrnodemon's broker to it, with no user or password:
+
+```ini
+[mqtt]
+uri = mqtt://127.0.0.1:1883
+```
+
+Only programs on that machine can connect. To use a Rradmon on another
+machine this way, it needs `-mqtt-listen-user` and a password; give Rrnodemon
+the same in `user` and `password_file`.
+
 ## Install
 
 Needs Python 3.7 or later with pyserial and paho-mqtt (1.x or 2.x). A
